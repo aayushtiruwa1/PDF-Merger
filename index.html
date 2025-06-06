@@ -1,0 +1,694 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Merger</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #121c2d;
+            color: #fff;
+        }
+        .navbar {
+            width: 100%;
+            background: #1e2a44;
+            padding: 20px 0;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1000;
+        }
+        .navbar ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+        }
+        .navbar li {
+            display: inline;
+        }
+        .navbar a {
+            color: #fff;
+            text-decoration: none;
+            font-size: 1.5em;
+            padding: 10px 20px;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+        .navbar a:hover {
+            background: #007bff;
+        }
+        .merger-container {
+            background: #1e2a44;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            width: 90%;
+            max-width: 800px;
+            text-align: center;
+            margin-top: 100px;
+        }
+        h1 {
+            margin: 0 0 30px;
+            color: #fff;
+            font-size: 2.5em;
+        }
+        .upload-area {
+            border: 3px dashed #007bff;
+            padding: 30px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1.5em;
+        }
+        .upload-area:hover {
+            background: #2a3b5c;
+        }
+        .file-list {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 30px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 2px solid #2a3b5c;
+            background: #26334d;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            font-size: 1.3em;
+        }
+        .file-item.dragging {
+            opacity: 0.5;
+        }
+        .file-item button {
+            background: #ff4d4d;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.2em;
+        }
+        .file-item button:hover {
+            background: #cc0000;
+        }
+        .merge-button, .download-button {
+            background: #007bff;
+            color: #fff;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.5em;
+            margin: 0 10px;
+        }
+        .merge-button:hover, .download-button:hover {
+            background: #0056b3;
+        }
+        .merge-button:disabled, .download-button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 20px;
+            color: #fff;
+            font-size: 1.3em;
+        }
+        #help-section {
+            display: none;
+            background: #26334d;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-size: 1.2em;
+            text-align: left;
+        }
+        #pricing-section {
+            background: linear-gradient(135deg, #2a1b4d, #4b267c);
+            padding: 60px 40px;
+            width: 90%;
+            max-width: 1200px;
+            text-align: center;
+            margin: 40px 0;
+            border-radius: 15px;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        #pricing-section h2 {
+            font-size: 2.5em;
+            margin: 0 0 30px;
+            color: #e0d1ff;
+        }
+        #pricing-section p {
+            font-size: 1.2em;
+            color: #d1c4e9;
+            margin-bottom: 20px;
+        }
+        .billing-toggle {
+            margin-bottom: 30px;
+        }
+        .billing-toggle label {
+            font-size: 1.2em;
+            margin: 0 10px;
+            color: #d1c4e9;
+        }
+        .billing-toggle input[type="checkbox"] {
+            display: none;
+        }
+        .billing-toggle .switch {
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+            background: #ccc;
+            border-radius: 17px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .billing-toggle .switch::after {
+            content: '';
+            width: 26px;
+            height: 26px;
+            background: #fff;
+            border-radius: 50%;
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            transition: transform 0.3s;
+        }
+        .billing-toggle input[type="checkbox"]:checked + .switch {
+            background: #007bff;
+        }
+        .billing-toggle input[type="checkbox"]:checked + .switch::after {
+            transform: translateX(26px);
+        }
+        .pricing-plans {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+        .pricing-plan {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 15px;
+            width: 300px;
+            text-align: center;
+            color: #fff;
+            transition: transform 0.3s;
+        }
+        .pricing-plan:hover {
+            transform: scale(1.05);
+        }
+        .pricing-plan h3 {
+            font-size: 1.8em;
+            margin: 0 0 15px;
+            color: #e0d1ff;
+        }
+        .pricing-plan .price {
+            font-size: 2em;
+            margin: 10px 0;
+            color: #fff;
+        }
+        .pricing-plan ul {
+            list-style: none;
+            padding: 0;
+            text-align: left;
+            margin: 20px 0;
+        }
+        .pricing-plan ul li {
+            font-size: 1.2em;
+            margin: 10px 0;
+            color: #d1c4e9;
+        }
+        .pricing-plan button {
+            background: #7b2cbf;
+            color: #fff;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1.2em;
+            transition: background 0.3s;
+        }
+        .pricing-plan button:hover {
+            background: #5a1a99;
+        }
+        .pricing-plan button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        footer {
+            width: 100%;
+            background: #1e2a44;
+            padding: 40px 20px;
+            color: #d1c4e9;
+            font-size: 1.2em;
+        }
+        .footer-logos {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .footer-logos img {
+            height: 30px;
+            margin: 0 20px;
+            filter: grayscale(100%);
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+        .footer-logos img:hover {
+            opacity: 1;
+        }
+        .footer-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .footer-column {
+            flex: 1;
+            min-width: 200px;
+        }
+        .footer-column h4 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+        .footer-column ul {
+            list-style: none;
+            padding: 0;
+        }
+        .footer-column ul li {
+            margin-bottom: 10px;
+        }
+        .footer-column ul li a {
+            color: #d1c4e9;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        .footer-column ul li a:hover {
+            color: #007bff;
+        }
+        .footer-column p {
+            margin: 0 0 20px;
+        }
+        .footer-bottom {
+            max-width: 1200px;
+            margin: 20px auto 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid #2a3b5c;
+            padding-top: 20px;
+            font-size: 1em;
+            color: #d1c4e9;
+        }
+        .footer-bottom .social-icons a {
+            color: #d1c4e9;
+            margin-left: 10px;
+            font-size: 1.2em;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        .footer-bottom .social-icons a:hover {
+            color: #007bff;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <ul>
+            <li><a href="#home" onclick="scrollToSection('merger-container')">Home</a></li>
+            <li><a href="#merge" onclick="scrollToSection('merger-container')">Merge PDFs</a></li>
+            <li><a href="#pricing" onclick="scrollToSection('pricing-section')">Pricing</a></li>
+            <li><a href="#clear" onclick="clearFiles()">Clear Files</a></li>
+            <li><a href="#help" onclick="toggleHelp()">Help</a></li>
+        </ul>
+    </nav>
+    <div class="merger-container" id="merger-container">
+        <h1>PDF Merger</h1>
+        <div class="upload-area" id="upload-area">
+            <p>Drag and drop PDF files here or click to upload</p>
+            <input type="file" id="file-input" accept="application/pdf" multiple hidden>
+        </div>
+        <ul class="file-list" id="file-list"></ul>
+        <div class="button-group">
+            <button class="merge-button" id="merge-button" disabled>Merge PDFs</button>
+            <button class="download-button" id="download-button" disabled>Download Merged PDF</button>
+        </div>
+        <p id="status"></p>
+        <div id="help-section">
+            <h2>Help</h2>
+            <p>Use this tool to merge multiple PDF files into one:</p>
+            <ul>
+                <li>Drag and drop PDF files or click the upload area to select files.</li>
+                <li>Reorder files by dragging them in the list.</li>
+                <li>Click "Merge PDFs" to combine files and download the result.</li>
+                <li>Use "Download Merged PDF" to re-download the merged file.</li>
+                <li>Click "Clear Files" in the navbar to reset the file list.</li>
+                <li>Check the Pricing section for plan details.</li>
+            </ul>
+        </div>
+    </div>
+    <div id="pricing-section">
+        <h2>Flexible Pricing Plans for Every Need</h2>
+        <p>Choose the plan that best fits your requirements and start optimizing your time today!</p>
+        <div class="billing-toggle">
+            <label>Monthly</label>
+            <input type="checkbox" id="billing-toggle">
+            <label class="switch" for="billing-toggle"></label>
+            <label>Annually <span style="color: #d1c4e9;">Save up to 20%</span></label>
+        </div>
+        <div class="pricing-plans">
+            <div class="pricing-plan">
+                <h3>Basic</h3>
+                <p class="price">Free</p>
+                <ul>
+                    <li>✓ Automated Meeting Scheduling</li>
+                    <li>✓ Basic Calendar Sync</li>
+                    <li>✓ Daily Schedule Overview</li>
+                    <li>✓ Email Reminders</li>
+                    <li>✓ Task Management</li>
+                    <li>✓ 24/7 Customer Support</li>
+                </ul>
+                <button disabled>Current Plan</button>
+            </div>
+            <div class="pricing-plan">
+                <h3>Pro</h3>
+                <p class="price">$9.99/month</p>
+                <ul>
+                    <li>✓ All Basic Plan Features</li>
+                    <li>✓ Advanced Calendar Integrations</li>
+                    <li>✓ Customizable Notifications</li>
+                    <li>✓ Priority Support</li>
+                    <li>✓ Analytics and Insights</li>
+                    <li>✓ Group Scheduling</li>
+                </ul>
+                <button onclick="alert('Redirecting to subscription page...')">Get Started</button>
+            </div>
+            <div class="pricing-plan">
+                <h3>Enterprise</h3>
+                <p class="price">Custom</p>
+                <ul>
+                    <li>✓ All Pro Plan Features</li>
+                    <li>✓ Dedicated Account Manager</li>
+                    <li>✓ Custom Integrations</li>
+                    <li>✓ Advanced Security Features</li>
+                    <li>✓ Team Collaboration Tools</li>
+                    <li>✓ Onboarding and Training</li>
+                </ul>
+                <button onclick="alert('Contacting Sales...')">Contact Sales</button>
+            </div>
+        </div>
+    </div>
+    <footer>
+        <div class="footer-logos">
+            <img src="https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png" alt="Google Logo">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/4/44/Microsoft_logo.svg" alt="Microsoft Logo">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon Logo">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Spotify_logo_without_text.svg" alt="Spotify Logo">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/6/6f/Slack_logo_%282019%29.svg" alt="Slack Logo">
+        </div>
+        <div class="footer-container">
+            <div class="footer-column">
+                <h4>PDFMerge</h4>
+                <p>PDFMerge is the scalable online workspace for your tech startups.</p>
+            </div>
+            <div class="footer-column">
+                <h4>Products</h4>
+                <ul>
+                    <li><a href="#download">Download</a></li>
+                    <li><a href="#templates">Templates</a></li>
+                    <li><a href="#roadmaps">Roadmaps</a></li>
+                    <li><a href="#integrations">Integrations</a></li>
+                    <li><a href="#dashboards">Dashboards</a></li>
+                    <li><a href="#importations">Importations</a></li>
+                </ul>
+            </div>
+            <div class="footer-column">
+                <h4>Company</h4>
+                <ul>
+                    <li><a href="#careers">Careers</a></li>
+                    <li><a href="#about">About us</a></li>
+                    <li><a href="#newsroom">Newsroom</a></li>
+                    <li><a href="#community">Community</a></li>
+                    <li><a href="#contact">Contact us</a></li>
+                    <li><a href="#customers">Customers</a></li>
+                </ul>
+            </div>
+            <div class="footer-column">
+                <h4>Partner</h4>
+                <ul>
+                    <li><a href="#experts">For experts</a></li>
+                    <li><a href="#startups">For startups</a></li>
+                    <li><a href="#agencies">For agencies</a></li>
+                    <li><a href="#corporations">For corporations</a></li>
+                    <li><a href="#universities">For universities</a></li>
+                </ul>
+            </div>
+            <div class="footer-column">
+                <h4>Resources</h4>
+                <ul>
+                    <li><a href="#support">Support</a></li>
+                    <li><a href="#securities">Securities</a></li>
+                    <li><a href="#help">Help center</a></li>
+                    <li><a href="#preferences">Preferences</a></li>
+                    <li><a href="#terms">Terms & legals</a></li>
+                    <li><a href="#privacy">Privacy policy</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>Copyright © 2025 PDFMerge. All rights reserved.</p>
+            <div class="social-icons">
+                <a href="#facebook">📘</a>
+                <a href="#twitter">🐦</a>
+                <a href="#linkedin">💼</a>
+                <a href="#instagram">📷</a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script>
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('file-input');
+        const fileList = document.getElementById('file-list');
+        const mergeButton = document.getElementById('merge-button');
+        const downloadButton = document.getElementById('download-button');
+        const status = document.getElementById('status');
+        const helpSection = document.getElementById('help-section');
+        let pdfFiles = [];
+        let mergedPdfBlob = null;
+
+        function scrollToSection(sectionId) {
+            document.getElementById(sectionId).scrollIntoView({ behavior: 'smooth' });
+            helpSection.style.display = 'none';
+        }
+
+        function clearFiles() {
+            pdfFiles = [];
+            mergedPdfBlob = null;
+            updateFileList();
+            mergeButton.disabled = true;
+            downloadButton.disabled = true;
+            status.textContent = 'File list cleared.';
+            helpSection.style.display = 'none';
+        }
+
+        function toggleHelp() {
+            helpSection.style.display = helpSection.style.display === 'none' ? 'block' : 'none';
+        }
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = '#2a3b5c';
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.background = 'none';
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.background = 'none';
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', () => {
+            handleFiles(fileInput.files);
+        });
+
+        function handleFiles(files) {
+            const newFiles = Array.from(files).filter(file => file.type === 'application/pdf');
+            if (newFiles.length === 0) {
+                status.textContent = 'Please upload valid PDF files.';
+                return;
+            }
+            newFiles.forEach(file => {
+                pdfFiles.push({ file, name: file.name });
+            });
+            updateFileList();
+            mergeButton.disabled = pdfFiles.length < 2;
+            downloadButton.disabled = true;
+            mergedPdfBlob = null;
+            status.textContent = '';
+        }
+
+        function updateFileList() {
+            fileList.innerHTML = '';
+            pdfFiles.forEach((pdf, index) => {
+                const li = document.createElement('li');
+                li.classList.add('file-item');
+                li.setAttribute('draggable', true);
+                li.setAttribute('data-index', index);
+                li.innerHTML = `
+                    <span>${pdf.name}</span>
+                    <button onclick="removeFile(${index})">Remove</button>
+                `;
+                li.addEventListener('dragstart', (e) => {
+                    li.classList.add('dragging');
+                    e.dataTransfer.setData('text/plain', index);
+                });
+                li.addEventListener('dragend', () => {
+                    li.classList.remove('dragging');
+                });
+                li.addEventListener('dragover', (e) => e.preventDefault());
+                li.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const fromIndex = e.dataTransfer.getData('text/plain');
+                    const toIndex = index;
+                    reorderFiles(fromIndex, toIndex);
+                });
+                fileList.appendChild(li);
+            });
+        }
+
+        function removeFile(index) {
+            pdfFiles.splice(index, 1);
+            updateFileList();
+            mergeButton.disabled = pdfFiles.length < 2;
+            downloadButton.disabled = true;
+            mergedPdfBlob = null;
+            status.textContent = '';
+        }
+
+        function reorderFiles(fromIndex, toIndex) {
+            const [movedFile] = pdfFiles.splice(fromIndex, 1);
+            pdfFiles.splice(toIndex, 0, movedFile);
+            updateFileList();
+            downloadButton.disabled = true;
+            mergedPdfBlob = null;
+        }
+
+        mergeButton.addEventListener('click', async () => {
+            if (pdfFiles.length < 2) {
+                status.textContent = 'Please upload at least two PDF files.';
+                return;
+            }
+            status.textContent = 'Merging PDFs...';
+            mergeButton.disabled = true;
+            downloadButton.disabled = true;
+
+            try {
+                const mergedPdf = await PDFLib.PDFDocument.create();
+                for (const pdf of pdfFiles) {
+                    const arrayBuffer = await pdf.file.arrayBuffer();
+                    const pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+                    const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
+                    copiedPages.forEach(page => mergedPdf.addPage(page));
+                }
+
+                const pdfBytes = await mergedPdf.save();
+                mergedPdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(mergedPdfBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'merged.pdf';
+                a.click();
+                URL.revokeObjectURL(url);
+                status.textContent = 'PDFs merged successfully!';
+                downloadButton.disabled = false;
+            } catch (error) {
+                console.error('Error merging PDFs:', error);
+                status.textContent = 'Error merging PDFs. Please try again.';
+            } finally {
+                mergeButton.disabled = pdfFiles.length < 2;
+            }
+        });
+
+        downloadButton.addEventListener('click', () => {
+            if (mergedPdfBlob) {
+                const url = URL.createObjectURL(mergedPdfBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'merged.pdf';
+                a.click();
+                URL.revokeObjectURL(url);
+                status.textContent = 'Merged PDF downloaded!';
+            } else {
+                status.textContent = 'No merged PDF available. Please merge PDFs first.';
+            }
+        });
+    </script>
+</body>
+</html>
